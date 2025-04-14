@@ -1,4 +1,4 @@
-
+ 
 A detailed plan to implement an infrastructure as code harness.io CICD pipeline using terraform and ansible to create and configure aws ec2 nodes as developer workstations, running scripts to add tools and configure aws options. list the tasks needed to ask questions about the current manual processes to be able to automate them in a harness CICD pipeline and create connectors, delegates, and what modules and templates would be needed from terraform and ansible.
 
 
