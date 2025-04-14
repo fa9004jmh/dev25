@@ -1,0 +1,966 @@
+
+A detailed plan to implement an infrastructure as code harness.io CICD pipeline using terraform and ansible to create and configure aws ec2 nodes as developer workstations, running scripts to add tools and configure aws options. list the tasks needed to ask questions about the current manual processes to be able to automate them in a harness CICD pipeline and create connectors, delegates, and what modules and templates would be needed from terraform and ansible.
+
+
+This solution will include:
+
+    Questions to ask stakeholders
+
+    Tasks for gathering manual process details
+
+    Setup of Harness.io pipeline (delegates, connectors)
+
+    Terraform modules for infrastructure
+
+    Ansible playbooks for configuration
+
+    CI/CD pipeline design steps
+
+1. Discovery Phase – Understanding the Manual Process
+
+Before building anything, you’ll want to map out the existing workflow. Here are the questions/tasks to ask/perform to understand the current setup:
+Infrastructure Provisioning
+
+    How are EC2 instances currently launched?
+
+    What AWS regions are being used?
+
+
+
+
+
+
++
+    What instance types are preferred?
+
+    Is there a standard VPC/subnet/Security Group setup?
+
+    Are SSH keys generated manually or pre-configured?
+
+Configuration
+
+    What OS/images are used for workstations? (Amazon Linux, Ubuntu, etc.)
+
+    What tools are installed on the developer workstations? (e.g., Docker, Git, IDEs, SDKs)
+
+    How are AWS credentials or profiles configured?
+
+    Are dotfiles or any user-specific configs required (e.g., ~/.bashrc, ~/.aws/config)?
+
+    Is there a naming convention for hostnames or tags?
+
+Access & Authentication
+
+    How is SSH access granted (IAM roles, Key Pairs, SSM)?
+
+    Are there user-specific accounts on each node?
+
+Lifecycle
+
+    How long are these workstations meant to live? Ephemeral or long-term?
+
+    Is there an automated teardown process?
+
+2. CI/CD Setup in Harness.io
+Connectors
+
+You will need to set up the following connectors:
+
+    Terraform Cloud/CLI Connector
+
+        Authenticated access to Terraform CLI or Terraform Cloud.
+
+    GitHub/GitLab Connector
+
+        For storing Terraform and Ansible code.
+
+    AWS Connector
+
+        IAM credentials (least privileged) for provisioning.
+
+    Ansible Connector (optional if using scripts directly in pipeline)
+
+        SSH-based or through a delegate with Ansible installed.
+
+Delegate(s)
+
+Deploy a Harness Delegate:
+
+    Use a Kubernetes or Docker delegate (depending on your environment).
+
+    Ensure it has network access to AWS, Git repo, and Ansible host/targets.
+
+    Should have access to Terraform and Ansible CLIs if running locally.
+
+3. Terraform Modules
+
+You’ll want to modularize your infrastructure for reuse and clarity.
+Core Modules
+
+    ec2-instance
+
+        Inputs: AMI, instance type, key pair, user data, tags
+
+        Outputs: instance ID, public IP, private IP
+
+    vpc (optional if using existing)
+
+    security-groups
+
+        Developer port access: SSH, VPN, etc.
+
+    iam-role (if EC2 needs AWS access)
+
+    key-pair (optional: generate or import)
+
+Terraform File Structure Example
+
+terraform/
+├── main.tf
+├── variables.tf
+├── outputs.tf
+├── modules/
+│   ├── ec2-instance/
+│   ├── security-group/
+│   └── iam-role/
+
+⚙️ 4. Ansible Roles & Playbooks
+
+Ansible will configure the developer environment after the EC2 nodes are provisioned.
+Required Roles
+
+    dev-tools-install: install packages like Docker, Git, etc.
+
+    aws-cli-setup: install and configure AWS CLI
+
+    dotfiles: clone and configure dotfiles (e.g., from GitHub)
+
+    users: create user accounts and set authorized_keys
+
+    ssm-agent: optional for SSM Session Manager support
+
+Ansible Directory Layout
+
+ansible/
+├── inventory/
+├── playbook.yml
+├── roles/
+│   ├── dev-tools-install/
+│   ├── aws-cli-setup/
+│   ├── dotfiles/
+│   └── users/
+
+5. Harness Pipeline Design
+Pipeline Stages
+
+    Terraform Plan
+
+        Plan infrastructure using selected variables.
+
+    Terraform Apply
+
+        Provision EC2 instances.
+
+    Wait/Approval (optional)
+
+        Manual approval before proceeding to config.
+
+    Ansible Configuration Stage
+
+        Run Ansible playbook using SSH to provisioned nodes.
+
+        Alternatively, run scripts inline via remote execution if minimal config.
+
+    Verification
+
+        Run health checks, verify tools are installed.
+
+        Return logs or artifacts.
+
+    Output/Notification
+
+        Email/Slack notification with instance details.
+
+6. Testing and Iteration
+
+Tasks:
+
+    Test Terraform apply and destroy flows
+
+    Validate SSH connectivity from delegate to EC2 nodes
+
+    Run Ansible manually to verify expected state
+
+    Add rollback steps if needed
+
+7. Security Best Practices
+
+    Use IAM roles for EC2 with least privilege.
+
+    Prefer SSM over SSH if possible.
+
+    Store sensitive variables in Harness secrets manager.
+
+    Rotate access keys regularly if used.
+
+8. Optional Enhancements
+
+    Instance Auto-shutdown using Lambda or SSM.
+
+    Dynamic inventory from Terraform outputs → Ansible.
+
+    Cost reporting tags for team/resource tracking.
+
+    JIT provisioning from Slack/ServiceNow via Harness trigger.
+
+
+Perfect — let’s set you up with the necessary Harness GitHub Connector and Delegate configuration for your repository:
+https://github.com/fa9004jmh/dev25
+Using SSH key authentication (no passwords).
+1. GitHub Connector (SSH Auth)
+
+In Harness, this connector allows the pipeline to clone the repo using SSH.
+Steps to Create GitHub SSH Connector
+Generate SSH Key (if not already done)
+
+Generate an SSH key pair (or use an existing one dedicated to Harness):
+
+ssh-keygen -t rsa -b 4096 -C "harness-delegate" -f ~/.ssh/harness_deploy_key
+
+    Public key: ~/.ssh/harness_deploy_key.pub
+
+    Private key: ~/.ssh/harness_deploy_key
+
+Add Public Key to GitHub
+
+    Go to: GitHub › Settings › SSH and GPG keys
+
+    Click "New SSH key"
+
+    Paste in the contents of your harness_deploy_key.pub
+
+    Give it a title like: harness-delegate
+
+Create the GitHub Connector in Harness
+
+In Harness UI:
+
+    Go to Project → Connectors → New Connector
+
+    Choose GitHub → Repository URL:
+
+    git@github.com:fa9004jmh/dev25.git
+
+    Choose SSH as the authentication method
+
+    Paste in the contents of your private key (harness_deploy_key) in the "SSH Key" field
+
+    Optional: Enable Git Fetch via Delegate if needed
+
+Save this connector as something like: GitHub_SSH_Dev25
+2. Delegate for SSH-Based GitOps
+
+The delegate is responsible for executing tasks, including Terraform, Ansible, and Git fetches over SSH.
+Options:
+
+    Docker Delegate (quick and flexible)
+
+    Kubernetes Delegate (recommended for clusters)
+
+Let’s assume Docker for simplicity.
+Install a Docker Delegate (CLI)
+
+Run this from a machine that has Docker and network access to:
+
+    GitHub (over port 22 or fallback to HTTPS)
+
+    AWS
+
+    Harness platform
+
+Download the Delegate YAML
+
+In Harness UI:
+
+    Go to Account Settings → Delegates
+
+    Click “Install Delegate” → Choose Docker
+
+    Give your delegate a name: e.g., dev25-delegate
+
+    Set appropriate tags like dev, terraform, ansible
+
+    Copy the Docker run command
+
+Something like:
+
+docker run -d --name harness-delegate \
+  -e DELEGATE_NAME=dev25-delegate \
+  -e ACCOUNT_ID=your_account_id \
+  -e DELEGATE_TOKEN=your_delegate_token \
+  -e MANAGER_HOST_AND_PORT=https://app.harness.io \
+  harness/delegate:latest
+
+Make sure:
+
+    This host can connect to GitHub via SSH (port 22)
+
+    You mount your SSH private key if Git tasks will run from the delegate manually
+
+You can inject the SSH private key like this:
+
+docker run -d --name harness-delegate \
+  -v ~/.ssh:/home/harness/.ssh:ro \
+  -e DELEGATE_NAME=dev25-delegate \
+  ...
+
+    Harness itself doesn’t require this unless you’re running Ansible or Git commands inside the delegate. The GitHub connector handles Git authentication.
+
+Final Checklist
+Task	Status
+Create SSH key for Harness
+Add SSH public key to GitHub
+Add GitHub SSH connector in Harness
+Deploy Docker delegate with network access
+Tag delegate appropriately
+Test GitHub connector (click "Test Connection")
+Next Steps
+
+Now that the connector and delegate are ready, you can:
+
+    Set up a Harness Pipeline to:
+
+        Pull Terraform & Ansible code from dev25 repo
+
+        Run Terraform stages
+
+        Execute configuration via SSH or Ansible
+
+    Reference your GitHub connector like so in Harness YAML:
+
+connectorRef: GitHub_SSH_Dev25
+repoName: fa9004jmh/dev25
+branch: main
+
+Awesome — here’s a sample Harness pipeline YAML (v1 structure) for Terraform Plan and Apply stages, using your GitHub repo https://github.com/fa9004jmh/dev25 with the SSH connector we configured earlier.
+Sample Pipeline Overview
+
+This pipeline does the following:
+
+    Pulls Terraform code from dev25 GitHub repo
+
+    Runs terraform init and terraform plan
+
+    Applies the Terraform plan to provision AWS EC2 instances for dev workstations
+
+    🔧 You’ll need Terraform files already structured in the repo under a known directory (e.g., terraform/ec2-dev/).
+
+Full Pipeline YAML – Terraform Plan & Apply
+
+Replace placeholders like ACCOUNT_ID, ORG_ID, etc., with your actual Harness project values.
+
+pipeline:
+  name: Dev Workstation Provisioning
+  identifier: Dev_Workstation_Provisioning
+  projectIdentifier: YOUR_PROJECT_ID
+  orgIdentifier: YOUR_ORG_ID
+  tags: [dev, terraform, ec2]
+
+  stages:
+    - stage:
+        name: Terraform Plan
+        identifier: Terraform_Plan
+        type: CI
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Checkout Terraform Code
+                  identifier: Checkout_TF_Code
+                  type: GitClone
+                  spec:
+                    connectorRef: GitHub_SSH_Dev25
+                    repoName: fa9004jmh/dev25
+                    branch: main
+                    depth: 50
+
+              - step:
+                  name: Terraform Init
+                  identifier: Terraform_Init
+                  type: Run
+                  spec:
+                    shell: Bash
+                    command: |
+                      cd terraform/ec2-dev
+                      terraform init
+
+              - step:
+                  name: Terraform Plan
+                  identifier: Terraform_Plan
+                  type: Run
+                  spec:
+                    shell: Bash
+                    command: |
+                      cd terraform/ec2-dev
+                      terraform plan -out=tfplan
+
+    - stage:
+        name: Terraform Apply
+        identifier: Terraform_Apply
+        type: CI
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Checkout Terraform Code
+                  identifier: Checkout_TF_Code_Apply
+                  type: GitClone
+                  spec:
+                    connectorRef: GitHub_SSH_Dev25
+                    repoName: fa9004jmh/dev25
+                    branch: main
+                    depth: 50
+
+              - step:
+                  name: Terraform Apply
+                  identifier: Terraform_Apply
+                  type: Run
+                  spec:
+                    shell: Bash
+                    command: |
+                      cd terraform/ec2-dev
+                      terraform apply -auto-approve tfplan
+
+Suggested Terraform Directory in Repo
+
+dev25/
+├── terraform/
+│   └── ec2-dev/
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── outputs.tf
+│       └── backend.tf (optional)
+Make sure the terraform/ec2-dev/ directory exists in the repo before running this pipeline.
+
+Security Notes
+
+    Store AWS access keys, secrets, and any sensitive values in Harness secrets manager, not in code.
+
+    If using remote backends (e.g., S3), include backend.tf and necessary credentials.
+
+Optional Enhancements
+
+    Add Terraform Destroy stage with manual approval for clean-up
+
+    Add Terraform validation (linting, formatting checks)
+
+    Trigger the pipeline via a Webhook on GitHub push events
+
+    Add Ansible config stage after Apply to configure the EC2 nodes
+
+Would you like me to add an Ansible Configuration stage next?
+(e.g., running a playbook against the new EC2 instances using outputs from Terraform)
+You said:
+Add Terraform validation (linting, formatting checks)
+ChatGPT said:
+
+Great call — adding Terraform validation steps like linting, formatting, and syntax checks helps catch issues early and keeps your IaC clean and consistent.
+What We'll Add:
+
+We'll insert a new stage (or group of steps) before the Terraform Init step in your pipeline. These checks will include:
+
+    terraform fmt – ensures code is properly formatted
+
+    terraform validate – checks syntax and logic
+
+    (Optional) tflint – a linter for Terraform best practices
+
+Updated Pipeline YAML with Terraform Validation
+
+Here’s the modified YAML with a Terraform Validation stage before the Terraform Plan stage:
+
+pipeline:
+  name: Dev Workstation Provisioning
+  identifier: Dev_Workstation_Provisioning
+  projectIdentifier: YOUR_PROJECT_ID
+  orgIdentifier: YOUR_ORG_ID
+  tags: [dev, terraform, ec2]
+
+  stages:
+    - stage:
+        name: Terraform Validation
+        identifier: Terraform_Validation
+        type: CI
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Checkout Code
+                  identifier: Checkout_TF_Code_Validation
+                  type: GitClone
+                  spec:
+                    connectorRef: GitHub_SSH_Dev25
+                    repoName: fa9004jmh/dev25
+                    branch: main
+                    depth: 50
+
+              - step:
+                  name: Terraform Format Check
+                  identifier: TF_Fmt
+                  type: Run
+                  spec:
+                    shell: Bash
+                    command: |
+                      cd terraform/ec2-dev
+                      terraform fmt -check -recursive
+
+              - step:
+                  name: Terraform Validate
+                  identifier: TF_Validate
+                  type: Run
+                  spec:
+                    shell: Bash
+                    command: |
+                      cd terraform/ec2-dev
+                      terraform init -backend=false
+                      terraform validate
+
+              # Optional: Add tflint if desired
+              # - step:
+              #     name: TFLint
+              #     identifier: TFLint
+              #     type: Run
+              #     spec:
+              #       shell: Bash
+              #       command: |
+              #         cd terraform/ec2-dev
+              #         tflint
+
+    - stage:
+        name: Terraform Plan
+        identifier: Terraform_Plan
+        type: CI
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Checkout Code
+                  identifier: Checkout_TF_Code
+                  type: GitClone
+                  spec:
+                    connectorRef: GitHub_SSH_Dev25
+                    repoName: fa9004jmh/dev25
+                    branch: main
+                    depth: 50
+
+              - step:
+                  name: Terraform Init
+                  identifier: Terraform_Init
+                  type: Run
+                  spec:
+                    shell: Bash
+                    command: |
+                      cd terraform/ec2-dev
+                      terraform init
+
+              - step:
+                  name: Terraform Plan
+                  identifier: Terraform_Plan
+                  type: Run
+                  spec:
+                    shell: Bash
+                    command: |
+                      cd terraform/ec2-dev
+                      terraform plan -out=tfplan
+
+    - stage:
+        name: Terraform Apply
+        identifier: Terraform_Apply
+        type: CI
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: Checkout Code
+                  identifier: Checkout_TF_Code_Apply
+                  type: GitClone
+                  spec:
+                    connectorRef: GitHub_SSH_Dev25
+                    repoName: fa9004jmh/dev25
+                    branch: main
+                    depth: 50
+
+              - step:
+                  name: Terraform Apply
+                  identifier: Terraform_Apply
+                  type: Run
+                  spec:
+                    shell: Bash
+                    command: |
+                      cd terraform/ec2-dev
+                      terraform apply -auto-approve tfplan
+
+🛠️ Requirements for tflint (Optional Step)
+
+If you include tflint, make sure:
+
+    It’s installed on the delegate (you can add it via a custom Docker image or setup step)
+
+    Add a .tflint.hcl config file if needed
+
+Benefits
+
+    Prevents poorly formatted Terraform files (fmt)
+
+    Validates syntax and provider config before hitting AWS (validate)
+
+    Encourages team-wide best practices if using tflint
+
+Want me to show how to include Terraform Destroy with manual approval next?
+Or should we move on to adding the Ansible config stage?
+You said:
+Want me to show how to include Terraform Destroy with manual approval next?
+Or should we move on to adding the Ansible config stage? yes for both
+ChatGPT said:
+
+Nice — let's go all in. Below you'll get both:
+Part 1: Terraform Destroy with Manual Approval
+Goal:
+
+Add a stage that:
+
+    Waits for manual approval (so no accidental teardown)
+
+    Destroys the previously applied infrastructure
+
+Terraform Destroy Stage YAML
+
+Add this as a new stage at the end of your pipeline.
+
+- stage:
+    name: Manual Approval Before Destroy
+    identifier: Manual_Approval_Destroy
+    type: Approval
+    spec:
+      execution:
+        steps:
+          - step:
+              name: Approve Terraform Destroy
+              identifier: Approve_TF_Destroy
+              type: HarnessApproval
+              spec:
+                approvalMessage: |
+                  Please approve to proceed with **Terraform Destroy** of developer workstation infrastructure.
+                includePipelineExecutionHistory: true
+                approvers:
+                  userGroups:
+                    - _project_all_users  # Change this to your user group ID
+                  minimumCount: 1
+                approverInputs: []
+
+- stage:
+    name: Terraform Destroy
+    identifier: Terraform_Destroy
+    type: CI
+    spec:
+      execution:
+        steps:
+          - step:
+              name: Checkout Code
+              identifier: Checkout_TF_Code_Destroy
+              type: GitClone
+              spec:
+                connectorRef: GitHub_SSH_Dev25
+                repoName: fa9004jmh/dev25
+                branch: main
+
+          - step:
+              name: Terraform Init (Destroy)
+              identifier: Terraform_Init_Destroy
+              type: Run
+              spec:
+                shell: Bash
+                command: |
+                  cd terraform/ec2-dev
+                  terraform init
+
+          - step:
+              name: Terraform Destroy
+              identifier: Terraform_Destroy
+              type: Run
+              spec:
+                shell: Bash
+                command: |
+                  cd terraform/ec2-dev
+                  terraform destroy -auto-approve
+
+Part 2: Ansible Configuration Stage
+Goal:
+
+After Terraform apply, run Ansible to install tools and configure AWS options on the newly created EC2 dev machines.
+Requirements:
+
+    Terraform output must export EC2 instance IP(s)
+
+    Add Ansible playbook and inventory in your repo (ansible/playbook.yml)
+
+    SSH key used by Ansible must have access to EC2 machines
+
+    Delegate must have Ansible installed, or use a custom image
+
+Example Ansible Directory in dev25 Repo
+
+dev25/
+├── terraform/
+│   └── ec2-dev/
+├── ansible/
+│   ├── playbook.yml
+│   ├── inventory/
+│   │   └── hosts
+│   └── roles/
+│       ├── dev-tools-install/
+│       ├── aws-cli-setup/
+│       └── dotfiles/
+
+If you're dynamically generating IPs, you can inject the IPs into the inventory file using Terraform output and a shell script.
+
+Ansible Stage YAML
+
+Add this stage after Terraform Apply:
+
+- stage:
+    name: Configure EC2 Dev Workstations
+    identifier: Ansible_Config
+    type: CI
+    spec:
+      execution:
+        steps:
+          - step:
+              name: Checkout Code
+              identifier: Checkout_Ansible_Code
+              type: GitClone
+              spec:
+                connectorRef: GitHub_SSH_Dev25
+                repoName: fa9004jmh/dev25
+                branch: main
+
+          - step:
+              name: Run Ansible Playbook
+              identifier: Run_Ansible
+              type: Run
+              spec:
+                shell: Bash
+                command: |
+                  cd ansible
+                  ansible-playbook -i inventory/hosts playbook.yml
+
+    You can enhance this by dynamically injecting inventory with a script or using Terraform output files.
+
+Ansible Inventory Example (Static)
+
+Here's a sample ansible/inventory/hosts file:
+
+[devworkstations]
+ec2-1.compute.amazonaws.com ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/dev_ec2_key
+
+For dynamic inventory, use Terraform output + sed or envsubst to generate this file before running the playbook.
+Wrap-Up
+
+
+Full provisioning pipeline
+Format/lint/validate steps
+Terraform apply + manual destroy
+Ansible config stage to fully build out dev boxes
+
+Absolutely — using Terraform to provision developer EC2 workstations is a powerful move, but there are some best practices that can keep your setup secure, scalable, and maintainable. Here's a breakdown tailored to your use case:
+Best Practices for Using Terraform to Create EC2 Developer Workstations
+ 1. Secure Access & Identity
+  Use IAM roles instead of hardcoded credentials
+
+    Assign IAM roles to EC2 instances with only the permissions devs need.
+
+    Use instance profiles (aws_iam_instance_profile) instead of embedding AWS access keys.
+
+ SSH Key Management
+
+    Use pre-generated or short-lived SSH keys via AWS Systems Manager (SSM).
+
+    Avoid hardcoding private keys in Terraform. Use external secrets managers or Harness Secrets.
+
+ Consider SSM Session Manager
+
+    You can eliminate SSH entirely and use AWS SSM to access machines.
+
+    Add the amazon-ssm-agent via Ansible or AMI.
+
+    Ensure IAM roles have SSM permissions.
+
+ 2. Lock Down the Network
+ Minimal Security Group Access
+
+    Only expose necessary ports (e.g., SSH from office IP or VPN CIDR).
+
+    Use VPC endpoints or private subnets for added control.
+
+ Use NAT Gateways for Internet Access (Optional)
+
+    If dev machines are in private subnets, route outbound traffic via a NAT gateway.
+
+ 3. Use Modular Terraform Code
+
+Break your code into reusable modules:
+
+    ec2_instance
+
+    vpc
+
+    security_group
+
+    key_pair
+
+    iam_role
+
+ Suggested structure:
+
+terraform/
+├── main.tf
+├── variables.tf
+├── outputs.tf
+└── modules/
+    ├── ec2/
+    ├── vpc/
+    ├── security_group/
+    └── iam/
+
+    This helps you version each module independently and promote reusability.
+
+ 4. Use Remote Backend (S3 + DynamoDB)
+
+Don’t store Terraform state locally — use:
+
+    S3 for state file storage
+
+    DynamoDB for state locking (avoids race conditions)
+
+Example backend.tf:
+
+terraform {
+  backend "s3" {
+    bucket         = "my-tf-state-bucket"
+    key            = "dev-workstations/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}
+
+ 5. User Data for Bootstrap or Config Mgmt Integration
+
+Use user_data in your EC2 resource to:
+
+    Install agents (SSM, CloudWatch, etc.)
+
+    Run bootstrap scripts before Ansible takes over
+
+Example:
+
+resource "aws_instance" "dev" {
+  ...
+  user_data = file("${path.module}/scripts/bootstrap.sh")
+}
+
+    Keep it lightweight; let Ansible do the heavy lifting.
+
+ 6. Tag Everything
+
+Standardize tags for:
+
+    Name
+
+    Owner
+
+    Environment
+
+    TTL (time-to-live)
+
+    Project
+
+This helps with tracking, cost reporting, and automated cleanups.
+
+Example:
+
+tags = {
+  Name        = "dev-machine-${var.user}"
+  Owner       = var.user
+  Environment = "dev"
+  TTL         = "24h"
+}
+
+ 7. Automated Teardown (Optional)
+
+For ephemeral environments:
+
+    Use Lambda to monitor TTL tags and terminate expired instances.
+
+    Schedule cleanup via Harness or external workflows.
+
+ 8. Outputs for Downstream Use
+
+Output IP addresses or instance IDs so they can feed:
+
+    Ansible inventory
+
+    Slack notifications
+
+    Developer handoffs
+
+Example:
+
+output "public_ips" {
+  value = aws_instance.dev.*.public_ip
+}
+
+ 9. Pre-checks & Validations
+
+Incorporate:
+
+    terraform validate
+
+    terraform fmt
+
+    tflint
+
+    checkov (for security scans)
+
+You can bake these into the Harness pipeline or a pre-commit hook.
+ 10. Support for Multiple Users / Teams
+
+    Parameterize instance names, SSH keys, and IAM roles
+
+    Use workspaces or separate state files per user/team
+
+    Support multi-tenancy via modules
+
+ Want Extra Credit?
+ Slack/Email Notifications
+
+Notify devs when their workstation is ready with the IP and SSH command.
+Tag-based Cost Reports
+
+Use tools like AWS Cost Explorer + tags to monitor cost per user/team.
+ AMI Baking
+
+Instead of provisioning from vanilla AMIs each time:
+
+    Bake your dev environment into an AMI using Packer
+
+    Use that as the base image for faster, predictable boots
+
+Let me know if you'd like:
+
+    A Terraform module starter pack for EC2 dev machines
+
+    A Packer template for a pre-baked dev AMI
+
+Or a TTL auto-destroy Lambda script
+
